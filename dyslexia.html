@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Dyslexia-Friendly Text Converter (Single-File)</title>
+<style>
+  :root{
+    --bg:#f7f7f5;
+    --fg:#101010;
+    --muted:#666;
+    --accent:#2b7cff;
+    --panel:#ffffff;
+    --focus:#ffee88;
+    --maxw:64ch;
+    --fs:20px;
+    --lh:1.8;
+    --ls:0.02em;
+    --ws:0.02em;
+    --ps:0.9em;
+  }
+  [data-theme="dark"]{ --bg:#0f1115; --fg:#e9e9ec; --muted:#a0a4ad; --panel:#181a20; --focus:#3b3a1f; }
+  [data-theme="sepia"]{ --bg:#f4ecd8; --fg:#2b2418; --muted:#6e604a; --panel:#fbf6ea; --focus:#f1e5b5; }
+
+  html,body{height:100%}
+  body{ margin:0; background:var(--bg); color:var(--fg); font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Noto Sans", "Liberation Sans", sans-serif; }
+  .app{ display:grid; grid-template-rows:auto 1fr; min-height:100%; }
+  header{ position:sticky; top:0; z-index:10; background:var(--panel); border-bottom:1px solid #0001; padding:10px 12px; }
+  header .row{ display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+  header .group{ background:var(--bg); border:1px solid #0001; border-radius:10px; padding:8px 10px; display:flex; gap:8px; align-items:center; }
+  header label{font-size:12px; color:var(--muted)}
+  header input[type="range"]{width:120px}
+  header select, header input[type="checkbox"], header button{ font:inherit; }
+  header button{ border:1px solid #0002; background:var(--accent); color:white; padding:8px 12px; border-radius:10px; cursor:pointer; }
+  header button.secondary{ background:transparent; color:var(--fg); }
+  header .spacer{flex:1}
+
+  .main{ display:grid; grid-template-columns: 320px 1fr; gap:16px; padding:16px; align-items:start; }
+  .panel{ background:var(--panel); border:1px solid #0001; border-radius:12px; padding:12px; }
+  .panel h2{margin:0 0 8px 0; font-size:16px}
+  .panel small{color:var(--muted)}
+  .panel textarea{ width:100%; min-height:220px; resize:vertical; font: 16px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; padding:10px; border-radius:8px; border:1px solid #0002; background:var(--bg); color:var(--fg); }
+  .panel .uploader{ display:flex; gap:8px; align-items:center; margin:8px 0 4px; }
+  .panel .uploader input[type="file"]{ border:1px dashed #0003; padding:8px; border-radius:8px; background:var(--bg); }
+  .panel .actions{display:flex; gap:8px; flex-wrap:wrap; margin-top:8px}
+  .panel .actions button{padding:8px 10px; border-radius:8px; border:1px solid #0002; background:var(--bg); cursor:pointer}
+
+  .reader-wrap{ position:relative; }
+  .reader{ background:var(--panel); border:1px solid #0001; border-radius:14px; padding:20px; }
+  .reader article{ font-size:var(--fs); line-height:var(--lh); letter-spacing:var(--ls); word-spacing:var(--ws); max-width:var(--maxw); margin:auto; text-align:left; }
+  .reader article p{ margin: 0 0 var(--ps) 0; }
+  .reader article p + p{ margin-top: var(--ps); }
+  .reader article b.segment{ font-weight:700 }
+  .reader article .chunk{ display:inline-block; margin-right: .2em }
+  .meta{ display:flex; justify-content:space-between; align-items:center; color:var(--muted); font-size:12px; margin-bottom:10px; }
+  .ruler{ position:absolute; left:0; right:0; height:2.4em; pointer-events:none; border-radius:8px; background: linear-gradient(0deg, transparent 0%, transparent 5%, var(--focus) 5%, var(--focus) 95%, transparent 95%, transparent 100%); mix-blend-mode:multiply; display:none; }
+  .ruler.show{ display:block; }
+
+  details.tests{ margin-top:12px; }
+  details.tests pre{ background:var(--bg); border:1px solid #0001; border-radius:8px; padding:8px; overflow:auto; max-height:200px; }
+
+  @media print{
+    header, .panel{ display:none !important; }
+    .main{ grid-template-columns: 1fr; padding:0 }
+    body{ background:white; }
+    .reader{ border:none }
+  }
+</style>
+</head>
+<body>
+<div class="app" id="app" data-theme="light">
+  <header>
+    <div class="row">
+      <div class="group">
+        <label>Theme</label>
+        <select id="theme">
+          <option value="light">Light</option>
+          <option value="sepia">Sepia</option>
+          <option value="dark">Dark</option>
+        </select>
+      </div>
+
+      <div class="group">
+        <label>Typeface</label>
+        <select id="typeface">
+          <option value="sans">Sans (default)</option>
+          <option value="mono">Monospace</option>
+          <option value="serif">Serif</option>
+          <option value="od">OpenDyslexic (CDN)</option>
+          <option value="atkinson">Atkinson Hyperlegible (CDN)</option>
+        </select>
+      </div>
+
+      <div class="group">
+        <label>Size</label><input id="fs" type="range" min="16" max="28" value="20" />
+        <label>Line</label><input id="lh" type="range" min="140" max="230" value="180" />
+        <label>Letters</label><input id="ls" type="range" min="0" max="10" value="2" />
+        <label>Words</label><input id="ws" type="range" min="0" max="16" value="2" />
+        <label>Width</label><input id="mw" type="range" min="40" max="90" value="64" />
+      </div>
+
+      <div class="group">
+        <label><input id="bionic" type="checkbox" /> Bionic bold</label>
+        <label><input id="chunk" type="checkbox" /> Chunk long words</label>
+        <label><input id="rulerToggle" type="checkbox" /> Reading ruler</label>
+        <label><input id="ragged" type="checkbox" checked /> Ragged right</label>
+      </div>
+
+      <div class="spacer"></div>
+
+      <button id="exportBtn" class="secondary" title="Download current output as HTML">Export</button>
+      <button id="printBtn" title="Print or Save to PDF">Print</button>
+    </div>
+  </header>
+
+  <div class="main">
+    <section class="panel">
+      <h2>Input</h2>
+      <div class="uploader">
+        <input type="file" id="file" accept=".txt,text/plain,.pdf,application/pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+        <small>Upload a .txt, .pdf, or .docx file, or paste below</small>
+      </div>
+      <textarea id="input" placeholder="Paste course text here…"></textarea>
+      <div class="actions">
+        <button id="cleanBtn" title="Normalize quotes, fix line breaks">Clean & Convert →</button>
+        <button id="insertSample">Insert Sample</button>
+        <button id="clearBtn">Clear</button>
+        <button id="runTestsBtn" title="Run built-in diagnostics">Run Diagnostics</button>
+      </div>
+      <details class="tests">
+        <summary>Diagnostics output</summary>
+        <pre id="testsOut" aria-live="polite"></pre>
+      </details>
+      <small>
+        Tips for dyslexia-friendly settings: larger size (20–22px), high line spacing (1.8–2.0), wider word spacing, and shorter line length (50–70ch). “Bionic bold” helps some readers by bolding the first part of words. Try the reading ruler to focus one line at a time.
+      </small>
+    </section>
+
+    <section class="reader-wrap">
+      <div class="meta">
+        <div>Output</div>
+        <div id="stats" aria-live="polite"></div>
+      </div>
+      <div class="ruler" id="ruler"></div>
+      <div class="reader" id="reader">
+        <article id="article" aria-label="Converted text will appear here"></article>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+(function(){
+  const $ = (sel) => document.querySelector(sel);
+  const app = $('#app');
+  const input = $('#input');
+  const file = $('#file');
+  const article = $('#article');
+  const stats = $('#stats');
+  const testsOut = $('#testsOut');
+
+  const theme = $('#theme');
+  const typeface = $('#typeface');
+  const fs = $('#fs');
+  const lh = $('#lh');
+  const ls = $('#ls');
+  const ws = $('#ws');
+  const mw = $('#mw');
+
+  const bionic = $('#bionic');
+  const chunk = $('#chunk');
+  const rulerToggle = $('#rulerToggle');
+  const ragged = $('#ragged');
+
+  const ruler = $('#ruler');
+  const reader = $('#reader');
+
+  const cleanBtn = $('#cleanBtn');
+  const clearBtn = $('#clearBtn');
+  const insertSample = $('#insertSample');
+  const exportBtn = $('#exportBtn');
+  const printBtn = $('#printBtn');
+  const runTestsBtn = $('#runTestsBtn');
+
+  let currentFontFaceStyle = null;
+
+  // ===== Helpers =====
+  function sanitizeText(t){
+    if(!t) return '';
+    t = t.replace(/\r\n?/g, '\n');
+    t = t.replace(/[“”]/g,'"').replace(/[‘’]/g,"'");
+    t = t.replace(/-\n(?=\w)/g, '');
+    t = t.replace(/\n{3,}/g, '\n\n');
+    t = t.replace(/[ \t]+\n/g, '\n');
+    return t.trim();
+  }
+
+  function splitParagraphs(t){
+    const parts = t.split(/\n{2,}/);
+    return parts.map(p => p.replace(/\n/g, ' '));
+  }
+
+  function makeBionic(word){
+    const letters = word.length;
+    const boldLen = Math.max(1, Math.round(letters * 0.4));
+    const head = word.slice(0, boldLen);
+    const tail = word.slice(boldLen);
+    return '<b class="segment">' + escapeHtml(head) + '</b>' + escapeHtml(tail);
+  }
+
+  function chunkWord(word){
+    if(word.length <= 8) return escapeHtml(word);
+    const size = 5; let out = [];
+    for(let i=0;i<word.length;i+=size){ out.push('<span class="chunk">' + escapeHtml(word.slice(i,i+size)) + '</span>'); }
+    return out.join('');
+  }
+
+  function escapeHtml(s){
+    return s.replace(/[&<>"']/g, function(m){
+      switch(m){
+        case '&': return '&amp;';
+        case '<': return '&lt;';
+        case '>': return '&gt;';
+        case '"': return '&quot;';
+        default: return '&#039;';
+      }
+    });
+  }
+
+  function transformParagraph(p){
+    const tokens = p.split(/\s+/);
+    const transformed = tokens.map(function(tok){
+      if(!tok.match(/[A-Za-z0-9]/)) return escapeHtml(tok);
+      let core = tok;
+      const m = tok.match(/^(.+?)([)\]\},.;:!?]+)$/);
+      let trail = '';
+      if(m){ core = m[1]; trail = m[2]; }
+      let out = escapeHtml(core);
+      if(bionic.checked) out = makeBionic(core);
+      if(chunk.checked)  out = chunkWord(core);
+      return out + escapeHtml(trail);
+    }).join(' ');
+    return '<p>' + transformed + '</p>';
+  }
+
+  function render(t){
+    const paras = splitParagraphs(t);
+    article.innerHTML = paras.map(transformParagraph).join('\n');
+    stats.textContent = t.split(/\s+/).filter(Boolean).length + ' words • ' + paras.length + ' paragraphs';
+  }
+
+  // ===== Settings -> CSS vars =====
+  function applySettings(){
+    app.setAttribute('data-theme', theme.value);
+
+    if(typeface.value === 'mono'){
+      document.body.style.fontFamily = 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace';
+    } else if(typeface.value === 'serif'){
+      document.body.style.fontFamily = 'Georgia, "Times New Roman", Times, serif';
+    } else if(typeface.value === 'od'){
+      loadCdnFont('OpenDyslexic', {
+        woff2: 'https://cdn.jsdelivr.net/gh/antijingoist/open-dyslexic/alternatives/OpenDyslexic-Regular.woff2',
+        woff: 'https://cdn.jsdelivr.net/gh/antijingoist/open-dyslexic/alternatives/OpenDyslexic-Regular.woff'
+      });
+      document.body.style.fontFamily = '"OpenDyslexic", system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif';
+    } else if(typeface.value === 'atkinson'){
+      loadCdnFont('Atkinson Hyperlegible', { woff2: 'https://fonts.gstatic.com/s/atkinsonhyperlegible/v19/Noac6Uj3zN9rA9g3B6uG2E.woff2' });
+      document.body.style.fontFamily = '"Atkinson Hyperlegible", system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif';
+    } else {
+      document.body.style.fontFamily = 'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Noto Sans", "Liberation Sans", sans-serif';
+    }
+
+    document.documentElement.style.setProperty('--fs', fs.value + 'px');
+    document.documentElement.style.setProperty('--lh', (lh.value/100).toString());
+    document.documentElement.style.setProperty('--ls', (ls.value/100) + 'em');
+    document.documentElement.style.setProperty('--ws', (ws.value/100) + 'em');
+    document.documentElement.style.setProperty('--maxw', mw.value + 'ch');
+
+    article.style.hyphens = 'none';
+    article.style.textAlign = ragged.checked ? 'left' : 'justify';
+    article.style.textJustify = ragged.checked ? 'auto' : 'inter-word';
+  }
+
+  function loadCdnFont(family, src){
+    if(currentFontFaceStyle){ currentFontFaceStyle.remove(); currentFontFaceStyle=null; }
+    const style = document.createElement('style');
+    const sources = [ src.woff2 ? "url('"+src.woff2+"') format('woff2')" : null, src.woff ? "url('"+src.woff+"') format('woff')" : null, src.ttf ? "url('"+src.ttf+"') format('truetype')" : null ].filter(Boolean).join(',');
+    style.textContent = "@font-face{font-family:'"+family+"';src:"+sources+";font-display:swap;}";
+    document.head.appendChild(style);
+    currentFontFaceStyle = style;
+  }
+
+  // ===== Reading ruler =====
+  function updateRulerVisibility(){ ruler.classList.toggle('show', rulerToggle.checked); }
+  reader.addEventListener('mousemove', function(e){
+    if(!rulerToggle.checked) return;
+    const rect = reader.getBoundingClientRect();
+    const y = e.clientY - rect.top + reader.scrollTop;
+    ruler.style.top = (y - parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--fs'))*1.2) + 'px';
+  });
+
+  // ===== File uploads (.txt/.pdf/.docx) =====
+  file.addEventListener('change', async function(e){
+    const f = e.target.files && e.target.files[0];
+    if(!f) return;
+    const name = (f.name || '').toLowerCase();
+    try{
+      if(name.endsWith('.txt')){
+        const text = await f.text();
+        input.value = text; process();
+      } else if(name.endsWith('.docx')){
+        input.value = 'Extracting text from DOCX…';
+        const text = await extractDocxText(f);
+        input.value = text; process();
+      } else if(name.endsWith('.pdf')){
+        input.value = 'Extracting text from PDF…';
+        const text = await extractPdfText(f);
+        input.value = text; process();
+      } else {
+        alert('Please upload a .txt, .pdf, or .docx file.');
+      }
+    }catch(err){ console.error(err); alert('Sorry, could not read that file. ' + (err && err.message ? err.message : '')); }
+  });
+
+  function process(){ const t = sanitizeText(input.value); render(t); }
+
+  cleanBtn.addEventListener('click', process);
+  clearBtn.addEventListener('click', function(){ input.value=''; article.innerHTML=''; stats.textContent=''; });
+  insertSample.addEventListener('click', function(){
+    input.value = 'INTRODUCTION TO STRUCTURES — WEEK 02\n\nBeams carry loads primarily by bending. The internal resisting system develops compression at the top fibers and tension at the bottom fibers. Between them is a neutral axis where fibers undergo minimal axial strain.\n\nKey terms:\n• Span — the clear distance between supports.\n• Deflection — the vertical displacement under load.\n• Modulus of Elasticity (E) — material stiffness.\n\nRules of thumb:\n1) Shorter spans deflect less (deflection increases with L³).\n2) Deeper sections are stiffer: doubling depth increases I by ~8× for rectangular sections.\n3) Concentrated loads cause peak shear near supports; uniformly distributed loads spread effects.\n\nWorked idea:\nA 3 m span with a midspan point load will see maximum bending at the center and maximum shear near the supports. Increase depth or choose a higher E material to reduce deflection.\n\nReading tip:\nChunk sentences. Scan bold starts of words. Use the ruler to follow one line at a time.';
+    process();
+  });
+
+  exportBtn.addEventListener('click', function(){
+    const blob = new Blob([buildStandaloneExport()], {type:'text/html;charset=utf-8'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'dyslexia-output.html';
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ URL.revokeObjectURL(url); a.remove(); }, 0);
+  });
+
+  printBtn.addEventListener('click', function(){ window.print(); });
+
+  [theme, typeface, fs, lh, ls, ws, mw, bionic, chunk, ragged].forEach(function(ctrl){
+    ctrl.addEventListener('input', function(){ applySettings(); if(ctrl===bionic || ctrl===chunk) process(); });
+  });
+  rulerToggle.addEventListener('change', updateRulerVisibility);
+
+  // ===== Diagnostics (basic tests) =====
+  runTestsBtn.addEventListener('click', async function(){
+    const logs = [];
+    function assertEq(label, a, b){ const ok = (a===b); logs.push((ok? '✅ ':'❌ ') + label + ' => ' + JSON.stringify(a)); if(!ok){ logs.push('   expected: ' + JSON.stringify(b)); } }
+
+    // sanitizeText
+    assertEq('sanitize replaces smart quotes', sanitizeText('“hi” ‘yo’'), '"hi" \"yo\"'.replace('\\"',"'")); // becomes "hi" 'yo'
+    logs.push('→ actual: ' + sanitizeText('“hi” ‘yo’'));
+
+    // hyphen fix
+    assertEq('hyphenation join', sanitizeText('long-\nword'), 'longword');
+
+    // split paragraphs
+    const sp = splitParagraphs('p1\n\np2 line1\nline2');
+    assertEq('splitParagraphs length', sp.length, 2);
+    assertEq('splitParagraphs join lines', sp[1], 'p2 line1 line2');
+
+    // makeBionic
+    const mb = makeBionic('reading');
+    logs.push('makeBionic("reading") => ' + mb);
+
+    // chunkWord
+    const cw = chunkWord('extraordinary');
+    logs.push('chunkWord("extraordinary") => ' + cw);
+
+    // fflate presence
+    logs.push(typeof fflate !== 'undefined' ? '✅ fflate present' : '❌ fflate missing');
+
+    // pdf.js availability test
+    try{
+      await ensurePdfJs();
+      logs.push('✅ pdf.js available (worker disabled)');
+    }catch(e){
+      logs.push('⚠️ pdf.js not available: ' + (e && e.message ? e.message : e));
+    }
+
+    testsOut.textContent = logs.join('\n');
+    testsOut.parentElement.open = true;
+  });
+
+  // ===== Initialize =====
+  applySettings(); updateRulerVisibility();
+
+  function buildStandaloneExport(){
+    const gcs = getComputedStyle(document.documentElement);
+    const css = (':root{--bg:#ffffff;--fg:#101010;--maxw:'+gcs.getPropertyValue('--maxw')+';--fs:'+gcs.getPropertyValue('--fs')+';--lh:'+gcs.getPropertyValue('--lh')+';--ls:'+gcs.getPropertyValue('--ls')+';--ws:'+gcs.getPropertyValue('--ws')+';--ps:0.9em;}\n'+
+    'body{margin:24px;background:var(--bg);color:var(--fg);font-family:'+document.body.style.fontFamily+'}\n'+
+    'article{font-size:var(--fs);line-height:var(--lh);letter-spacing:var(--ls);word-spacing:var(--ws);max-width:var(--maxw);margin:auto}\n'+
+    'p{margin:0 0 var(--ps) 0}\n'+
+    '.segment{font-weight:700}\n'+
+    '.chunk{display:inline-block;margin-right:.2em}').trim();
+    return '<!DOCTYPE html><meta charset="utf-8"><title>Dyslexia-Friendly Output</title><style>'+css+'</style><article>'+article.innerHTML+'</article>';
+  }
+
+  // ===== DOCX extraction (uses tiny unzip via fflate embedded below) =====
+  async function extractDocxText(file){
+    const buf = new Uint8Array(await file.arrayBuffer());
+    const files = await new Promise(function(resolve, reject){ fflate.unzip(buf, function(err, data){ err ? reject(err) : resolve(data); }); });
+    const doc = files['word/document.xml'];
+    if(!doc) throw new Error('document.xml not found');
+    const xml = new TextDecoder('utf-8').decode(doc);
+    const dom = new DOMParser().parseFromString(xml, 'application/xml');
+    const ps = Array.prototype.slice.call(dom.getElementsByTagName('w:p'));
+    const out = ps.map(function(p){
+      const ts = Array.prototype.slice.call(p.getElementsByTagName('w:t'));
+      return ts.map(function(t){ return t.textContent; }).join('');
+    }).join('\n\n');
+    return sanitizeText(out);
+  }
+
+  // ===== PDF extraction (no dynamic import; robust loader; worker disabled to avoid CORS) =====
+  async function ensurePdfJs(){
+    if(window.pdfjsLib){
+      try{ window.pdfjsLib.GlobalWorkerOptions.disableWorker = true; }catch(_){ }
+      return window.pdfjsLib;
+    }
+    const url = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.10.111/pdf.min.js';
+    await new Promise(function(resolve, reject){
+      const s = document.createElement('script');
+      s.src = url; s.onload = resolve; s.onerror = function(){ reject(new Error('Failed to load pdf.js from CDN')); };
+      document.head.appendChild(s);
+    });
+    if(!window.pdfjsLib) throw new Error('pdf.js failed to initialize');
+    try{ window.pdfjsLib.GlobalWorkerOptions.disableWorker = true; }catch(_){ }
+    return window.pdfjsLib;
+  }
+
+  async function extractPdfText(file){
+    const data = await file.arrayBuffer();
+    const pdfjs = await ensurePdfJs();
+    const loadingTask = pdfjs.getDocument({ data: data });
+    const pdf = await loadingTask.promise;
+    let full = [];
+    for(let p=1; p<=pdf.numPages; p++){
+      const page = await pdf.getPage(p);
+      const content = await page.getTextContent();
+      const strings = content.items.map(function(it){ return (it && it.str) ? it.str : ''; }).join(' ');
+      full.push(strings);
+    }
+    return sanitizeText(full.join('\n\n'));
+  }
+
+})();
+</script>
+
+<!-- Lightweight fflate (unzip) library for DOCX support -->
+<script>
+!function(){function e(e,t){var n=new Uint8Array(e),r=[];for(var i=0;i<n.length-3;i++)if(80===n[i]&&75===n[i+1]&&3===n[i+2]&&4===n[i+3]){var a=i+26,o=n[a]|n[a+1]<<8,f=n[a+2]|n[a+3]<<8,u=n[i+18]|n[i+19]<<8|n[i+20]<<16|n[i+21]<<24,l=i+30+o+f,c=n.subarray(i+30,i+30+o),d=new TextDecoder().decode(c),s=n.subarray(l,l+u);r.push([d,s])}var p={};r.forEach(function(e){p[e[0]]=e[1]}),t(null,p)}window.fflate={unzip:function(t,n){e(t,n)}}}();
+</script>
+</body>
+</html>
